@@ -1,2 +1,2 @@
 # npv-graph
-Graphical NPV computation
+Graphical NPV decision tree computation.
