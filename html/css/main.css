@@ -23,11 +23,22 @@ div.blob {
 	overflow: hidden;
 	border-radius: 5px;
 	padding: 4px;
+
+	border-style: solid;
+	border-width: 1px;
+	border-color: green;
+	transition: border-color 2s;
 }
 
 div.blob.selected {
-	background-color: red;
+	background-color: pink;
 }
+
+div.blob.unsettled {
+	border-color: red;
+	transition: border-color 0s;
+}
+
 
 // https://stackoverflow.com/questions/1953119/jquery-draggable-changing-css-top-value
 .ui-draggable-dragging{

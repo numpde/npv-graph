@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<title>NPV decision tree</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+
+  <title>Funky NPV</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
@@ -10,10 +14,12 @@
   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
 
   <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+  <link rel="stylesheet" type="text/css" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/themes/base/jquery-ui.css"/>
+
 
   <script src="js/jquery.ui.touch-punch.min.js"></script>
-  <script src="js/jquery.mobile-events.min.js"></script>
 
+<!--  <script src="js/jquery.mobile-events.min.js"></script>-->
 <!--  <script src="js/jquery-doubletap.js"></script>-->
 
   <link rel="stylesheet" type="text/css" href="css/main.css">
@@ -50,58 +56,74 @@
       return lines;
     }
 
-
-    function evaluateAll() {
+    function getVarsFromBlobs() {
       var vars = $("div.blob").toArray().reduce(
         function(acc, b) {
-          var v = $(b).find(".caption").text();
+          var v = $(b).data('caption');
           if (v) {
-            acc[v] = parseFloat($(b).find(".value").text());
+            acc[v] = $(b).data('value');
           }
           return acc;
         },
         {}
       );
-      $("div.blob").each(function() {
-        // This blob
-        var b = $(this);
-        // Sum from incoming connections
-        var lines = getLinesFromTo(null, b).toArray();
-        var insum = lines.reduce(
-          function(s, line) {
-            var a = $("div.blob[name=" + $(line).data('a') + "]");
-            return s + parseFloat(a.find(".value").text());
-          },
-          0
-        );
-        // Current display value of the blob
-        var t = b.find(".value").text();
-        var f = ("" + b.data('formula'));
-        // Parse formula
-        f = f.includes(':') ? f.split(":", 2) : ["", f];
-        // Compute this blob's result
-        var r = NaN;
-        try {
-          var s = f[1].replace("#", "(" + insum + ")");
-          for (var v in vars) {
-            s = s.replace("$" + v, "(" + vars[v] + ")");
-          }
-          s = s.replace("%", " * 0.01");
-          r = parseFloat(eval(s));
-        } catch(err) {
-          //
+      return vars;
+    }
+
+    function evaluateBlob(b) {
+      var vars = getVarsFromBlobs();
+
+      // This blob
+      var b = $(b);
+      // Sum from incoming connections
+      var lines = getLinesFromTo(null, b).toArray();
+      var insum = lines.reduce(
+        function(s, line) {
+          var a = $("div.blob[name=" + $(line).data('a') + "]");
+          return s + a.data('value');
+        },
+        0
+      );
+      // Parse formula
+      var f = b.data('formula');
+      // Compute this blob's result
+      var r = NaN;
+      try {
+        f = f.replace("#", "(" + insum + ")");
+        for (var v in vars) {
+          f = f.replace("$" + v, "(" + vars[v] + ")");
         }
-        // Visualize result
-        b.find(".caption").text("" + f[0]);
-        b.find(".value").text("" + r);
-      });
+        f = f.replace("%", " * 0.01");
+        r = parseFloat(eval(f));
+      } catch(err) {
+        r = NaN;
+      }
+      // Save result
+      b.data('value', r);
+
+      // Visualize result
+      b.find(".caption").text(b.data('caption'));
+
+      var old_val = b.find(".value").text();
+      var new_val = "" + b.data('value');
+      b.find(".value").text(new_val);
+
+      if (old_val != new_val) {
+        b.addClass("unsettled");
+      } else {
+        b.removeClass("unsettled");
+      }
+    }
+
+    function evaluateAllBlobs() {
+      $("div.blob").each(function() { evaluateBlob($(this)); });
     }
 
     // On-ready: set auto-evaluate
     $(function() {
       setInterval(
         function() {
-          evaluateAll();
+          evaluateAllBlobs();
         },
         1000
       );
@@ -111,6 +133,7 @@
         var blobs = $("div.blob");
         blobs.removeClass("selected");
         blobs.draggable('enable');
+        blobs.resizable('disable');
     }
 
     // On-ready: register SVG arrowhead
@@ -130,11 +153,27 @@
       });
     }
 
-    function promptFormula(a) {
-      var v = prompt("Enter cell formula:", a.data('formula'));
-      if (v) {
-        a.data('formula', v);
-        evaluateAll();
+    function parseUserInputForBlob(b) {
+      var f = b.data('userinput');
+
+      // Parse formula
+      f = f.includes(':') ? f.split(":", 2) : ["", f];
+      b.data('caption', f[0]);
+      b.data('formula', f[1]);
+
+      // The computed value
+      b.data('value', NaN);
+    }
+
+    function promptFormulaForBlob(b) {
+      var f = prompt("Specify cell in the format Caption: Formula", b.data('userinput'));
+      if (f) {
+        b.data('userinput', f);
+        parseUserInputForBlob(b);
+
+        // Trigger computation
+        evaluateBlob(b);
+        evaluateAllBlobs();
       }
     }
 
@@ -152,8 +191,8 @@
       var y1 = a.position().top + a.innerHeight() / 2;
       var x2 = b.position().left + b.innerWidth() / 2;
       var y2 = b.position().top + b.innerHeight() / 2;
-      var s = 0.55 * Math.sqrt(a.outerWidth() ** 2 + a.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2));
-      var t = 0.55 * Math.sqrt(b.outerWidth() ** 2 + b.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2));
+      var s = Math.min(0.48, 0.55 * Math.sqrt(a.outerWidth() ** 2 + a.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)));
+      var t = Math.min(0.48, 0.55 * Math.sqrt(b.outerWidth() ** 2 + b.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)));
       line.attr('x1', x1 + s * (x2 - x1));
       line.attr('y1', y1 + s * (y2 - y1));
       line.attr('x2', x2 - t * (x2 - x1));
@@ -196,8 +235,10 @@
       // Order matters: https://stackoverflow.com/a/18032193
 
       blob.data('id', nblobs++);
-      blob.data('formula', "Result: #");
       blob.attr('name', blob.data('id'));
+
+      blob.data('userinput', "Result: #");
+      parseUserInputForBlob(blob);
 
       blob.append($('<span class="caption" /> <br> <span class="value" />'));
 
@@ -207,7 +248,9 @@
         } else {
           unselectAllBlobs();
           $(blob).addClass("selected");
-          $(blob).draggable('disable');
+          $(blob).resizable('enable');
+          // Too late?
+          //$(blob).draggable('disable');
         }
         silence(evt);
       }
@@ -215,6 +258,10 @@
       blob.draggable({
         // https://jqueryui.com/draggable/#events
         'containment': "parent",
+        'start': function(evt) {
+          // Too late to unselect here?
+          unselectAllBlobs();
+        },
         'stop': function(evt) {
         },
         'drag': function(evt) {
@@ -222,8 +269,10 @@
         },
       });
 
-      blob.doubletap(silence);
+      //blob.doubletap(silence);
+
       blob.dblclick(silence);
+      //blob.dblclick(log);
 
       blob.click(function(evt) {
         var a = $("div.blob.selected");
@@ -231,7 +280,7 @@
         if (a.length) {
           unselectAllBlobs();
           if (a.is(b)) {
-            promptFormula(a);
+            promptFormulaForBlob(a);
           } else {
             var lines = getLinesFromTo(a, b);
             if (lines.length) {
@@ -246,6 +295,18 @@
         silence(evt);
       });
 
+      blob.resizable({
+        disabled: true,
+        containment: "parent",
+        minHeight: 30,
+        minWidth: 50,
+        resize: function(evt) {
+          correctLinesForBlob($(this));
+          unselectAllBlobs();
+        },
+      });
+      //
+
       return blob;
     }
 
@@ -253,7 +314,7 @@
       var ox = param.cx - param.w / 2;
       var oy = param.cy - param.h / 2;
       var css = {left: ox, top: oy, width: param.w, height: param.h};
-      var blob = $('<div class="blob"></div>');
+      var blob = $('<div class="blob ui-widget-content"></div>');
       $(to).append(blob.css(css));
       prepareBlob(blob);
     }
@@ -331,12 +392,11 @@
       e.g.
       <span class="formula">Math.max(#, 0)</span>.
       The cells are recomputed periodically.
-      See <a href="img/example01.png" target="_blank">example</a>.
+      See <a href="img/example02.png" target="_blank">example</a>.
     </div>
   </div>
   <div class="row">
     <div class="col b canvas">
-
     </div>
   </div>
   <div class="row">
@@ -351,6 +411,10 @@
     </div>
   </div>
 </div>
+
+<script>
+  $("#id").resizable();
+</script>
 
 </body>
 </html>
