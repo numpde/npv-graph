@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<title>Graphical NPV</title>
+<title>NPV decision tree</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
@@ -54,7 +54,10 @@
     function evaluateAll() {
       var vars = $("div.blob").toArray().reduce(
         function(acc, b) {
-          acc[$(b).find(".caption").text()] = parseFloat($(b).find(".value").text());
+          var v = $(b).find(".caption").text();
+          if (v) {
+            acc[v] = parseFloat($(b).find(".value").text());
+          }
           return acc;
         },
         {}
@@ -75,7 +78,7 @@
         var t = b.find(".value").text();
         var f = ("" + b.data('formula'));
         // Parse formula
-        f = f.includes(':') ? f.split(":", 2) : ["Result", f];
+        f = f.includes(':') ? f.split(":", 2) : ["", f];
         // Compute this blob's result
         var r = NaN;
         try {
@@ -114,7 +117,7 @@
     $( function() {
       svg = '<svg height="100%" width="100%" xmlns="http://www.w3.org/2000/svg">' +
             '<defs>' +
-            '<marker id="arrowhead" class="arrow" markerWidth="13" markerHeight="13" refX="10" refY="6" orient="auto"><path d="M2,2 L2,11 L10,6 L2,2" />' +
+            '<marker id="arrowhead" class="arrow" viewBox="0 0 10 10" refX="7" refY="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" />' +
             '</marker>' +
             '</defs>' +
             //'<line class="arrow" x1="20" y1="60" x2="100" y2="200" marker-end="url(#arrowhead)"/>' +
@@ -198,7 +201,7 @@
 
       blob.append($('<span class="caption" /> <br> <span class="value" />'));
 
-      function dblclick(evt) {
+      function selection(evt) {
         if (blob.hasClass("selected")) {
           unselectAllBlobs();
         } else {
@@ -219,19 +222,8 @@
         },
       });
 
-      blob.doubletap(
-        function(evt) {
-          dblclick(evt, this);
-        }
-      );
-
-      blob.dblclick(
-        {},
-        function(evt) {
-          dblclick(evt, this);
-        }
-      );
-
+      blob.doubletap(silence);
+      blob.dblclick(silence);
 
       blob.click(function(evt) {
         var a = $("div.blob.selected");
@@ -248,6 +240,8 @@
               connectBlobs(a, b);
             }
           }
+        } else {
+          selection(evt);
         }
         silence(evt);
       });
@@ -304,8 +298,40 @@
   <div class="row">
     <div class="col">
       <h1>
-        Graphical NPV
+        NPV decision tree
       </h1>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col" style="font-size:80%">
+      This is a simple graphical tool for
+      <a href="https://www.investopedia.com/terms/n/npv.asp" target="_blank">NPV</a>
+      decision tree computation.
+      Double-click to add a new cell.
+      Click a cell to activate.
+      Click again to edit its formula,
+      or another cell to dis/connect.
+      The formula should be like
+      <ul>
+        <li>
+          <span class="formula">r: 15%</span>
+          --
+          this cell, called <span class="formula">r</span>, has the value <span class="formula">15%</span>,
+          <em>or</em>
+        </li>
+        <li>
+          <span class="formula">PV: # / ((1 + $r) ** 2)</span>
+          --
+          this cell, called <span class="formula">PV</span>, is the sum <span class="formula">#</span>
+          of inflow cells discounted over two years by <span class="formula">r</span>.
+        </li>
+      </ul>
+      You can use the
+      <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math" target="_blank">Math object</a>,
+      e.g.
+      <span class="formula">Math.max(#, 0)</span>.
+      The cells are recomputed periodically.
+      See <a href="img/example01.png" target="_blank">example</a>.
     </div>
   </div>
   <div class="row">
@@ -315,9 +341,12 @@
   </div>
   <div class="row">
     <div class="col">
+      <div class="float-left">
+        License: MIT
+      </div>
       <div class="float-right">
-        &copy; 2020
-        <a href="http://numpde.xyz/" target="_blank">R. Andreev</a>
+        <a href="http://numpde.xyz/" target="_blank">RA</a>
+        &lt;busybus &#x1f408; null.net&gt;
       </div>
     </div>
   </div>

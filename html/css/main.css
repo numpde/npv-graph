@@ -1,6 +1,10 @@
 
 div.b {
-	background-color: #ccc;
+	background-color: #ddd;
+}
+
+div.row + div.row {
+	padding-bottom: 15px;
 }
 
 div.canvas {
@@ -42,7 +46,14 @@ line.arrow {
 marker.arrow {
   stroke: red;
   stroke-width: 1;
-  fill: none;
+  fill: red;
   opacity: 1;
 }
 
+span.formula {
+	color: blue;
+}
+
+ul {
+	margin: 0;
+}
