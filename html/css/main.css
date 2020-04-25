@@ -1,0 +1,48 @@
+
+div.b {
+	background-color: #ccc;
+}
+
+div.canvas {
+	width: 100%;
+	height: 1000px;
+
+	margin: 0;
+	padding: 0;
+}
+
+div.blob {
+	background-color: white;
+	position: absolute;
+	user-select: none;
+	font-size: 8pt;
+	overflow: hidden;
+	border-radius: 5px;
+	padding: 4px;
+}
+
+div.blob.selected {
+	background-color: red;
+}
+
+// https://stackoverflow.com/questions/1953119/jquery-draggable-changing-css-top-value
+.ui-draggable-dragging{
+    top:0 !important;
+}
+
+
+line.arrow {
+  stroke: red;
+  stroke-width: 2;
+  marker-end: url(#arrowhead);
+  position: absolute;
+  opacity: 0.8;
+}
+
+marker.arrow {
+  stroke: red;
+  stroke-width: 1;
+  fill: none;
+  opacity: 1;
+}
+
