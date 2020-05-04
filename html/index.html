@@ -1,11 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-
-  <title>Funky NPV</title>
+  <title>Blobular</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
@@ -18,97 +14,265 @@
 
   <script src="js/jquery.ui.touch-punch.min.js"></script>
 
-<!--  <script src="js/jquery.mobile-events.min.js"></script>-->
-<!--  <script src="js/jquery-doubletap.js"></script>-->
-
-  <link rel="stylesheet" type="text/css" href="css/main.css">
-
+  <link rel="stylesheet" type="text/css" href="css/main.css?v=20200504">
 </head>
-<body>
 <script>
-    var defaultBlobW = 60;
-    var defaultBlobH = 40;
-
+    // Graph items counters
     var nblobs = 0;
     var nlines = 0;
 
-    function log(evt, what) {
+    // Graph: visuals
+    var defaultBlobW = 60;
+    var defaultBlobH = 40;
+
+    // Key codes
+    ENTER = 13;
+    ESCAPE = 27;
+
+    // Zip util: https://stackoverflow.com/a/49035018/
+    function* zip(...its) {
+      function* iter(it) {
+        yield* it;
+      }
+      its = its.map(iter);
+      while (true) {
+        let rs = its.map(it => it.next());
+        if (rs.some(r => r.done))
+          return;
+        yield rs.map(r => r.value);
+      }
+    }
+
+
+    // Math functions
+
+    function log10(x) {
+      return Math.log10(x);
+    }
+
+    function log2(x) {
+      return Math.log2(x);
+    }
+
+    function log(x) {
+      return Math.log(x);
+    }
+
+    function exp(x) {
+      return Math.exp(x);
+    }
+
+    function numbers(a, b) {
+      return Array(Math.max(b - a + 1, 0)).fill().map((_, i) => (a + i));
+    }
+
+    function sum(arr) {
+        return arr.reduce((acc, x) => (acc + x), 0);
+    }
+
+    function prod(arr) {
+      return arr.reduce((acc, x) => (acc * x), 1);
+    }
+
+    function max(arr, x=undefined) {
+      if (x == undefined)
+        return arr.reduce((m, v) => (m > v ? m : v), arr[0]);
+      else
+        return Math.max(arr, x);
+    }
+
+    function min(arr, x=undefined) {
+      if (x == undefined)
+        return arr.reduce((m, v) => (m < v ? m : v), arr[0]);
+      else
+        return Math.min(arr, x);
+    }
+
+    // Diagnostic log to console
+    function logger(evt, what) {
       console.log({'event': (evt.type ? evt.type : evt), 'more': what});
     }
 
+    // Convenience function for events
     function silence(evt) {
         evt.stopPropagation();
         evt.preventDefault();
     }
 
-
+    // Graph util
+    // a and b are blobs, but can be null
     function getLinesFromTo(a, b) {
-      var lines = $("line").filter(function(i) {
-        var line = $(this);
-        var ia = (a === null ? true : (line.data('a') == a.data('id')));
-        var ib = (b === null ? true : (line.data('b') == b.data('id')));
+      let lines = $("line").filter(function(i) {
+        let line = $(this);
+        let ia = (a === null) || (line.data('a') == a.data('id'));
+        let ib = (b === null) || (line.data('b') == b.data('id'));
         return (ia & ib);
       });
       return lines;
     }
 
+    // Graph util
+    // which: -1 (outgoing), 0 (both), +1 (incoming)
+    function getLinesOf(blob, which=0) {
+      let lines = $("line").filter(function(i) {
+        return (
+          ((which <= 0) && (blob.data('id') == $(this).data('a'))) ||
+          ((0 <= which) && ($(this).data('b') == blob.data('id')))
+        );
+      });
+      return lines;
+    }
+
+    // Convert blob Caption-Values to a map of variables
     function getVarsFromBlobs() {
-      var vars = $("div.blob").toArray().reduce(
+      let vars = $("div.blob").toArray().sort(
+        // Order by decreasing Caption length
+        function(a, b) {
+          return Math.sign($(b).data('caption').length - $(a).data('caption').length);
+        }
+      ).reduce(
+        // Convert to a Map : Caption -> Value
         function(acc, b) {
-          var v = $(b).data('caption');
-          if (v) {
-            acc[v] = $(b).data('value');
+          let cap = $(b).data('caption');
+          if (cap) {
+            acc.set(cap, $(b).data('value'));
           }
           return acc;
         },
-        {}
+        new Map()
       );
       return vars;
     }
 
-    function evaluateBlob(b) {
-      var vars = getVarsFromBlobs();
+    //
+    function updateBlobValue(b, v) {
+      // Save result; avoid "undefined"
+      b.data('value', ((v != null) ? v : null));
 
-      // This blob
-      var b = $(b);
-      // Sum from incoming connections
-      var lines = getLinesFromTo(null, b).toArray();
-      var insum = lines.reduce(
-        function(s, line) {
-          var a = $("div.blob[name=" + $(line).data('a') + "]");
-          return s + a.data('value');
-        },
-        0
-      );
-      // Parse formula
-      var f = b.data('formula');
-      // Compute this blob's result
-      var r = NaN;
-      try {
-        f = f.replace("#", "(" + insum + ")");
-        for (var v in vars) {
-          f = f.replace("$" + v, "(" + vars[v] + ")");
-        }
-        f = f.replace("%", " * 0.01");
-        r = parseFloat(eval(f));
-      } catch(err) {
-        r = NaN;
-      }
-      // Save result
-      b.data('value', r);
-
-      // Visualize result
+      // Visualize
       b.find(".caption").text(b.data('caption'));
 
-      var old_val = b.find(".value").text();
-      var new_val = "" + b.data('value');
-      b.find(".value").text(new_val);
+      let old_text = b.find(".value").text();
+      let new_text;
 
-      if (old_val != new_val) {
+      if (Array.isArray(b.data('value'))) {
+        new_text = "[" + b.data('value').map(JSON.stringify).join(", ") + "]";
+        b.addClass("array");
+      } else {
+        new_text = JSON.stringify(b.data('value'));
+        b.removeClass("array");
+      }
+
+      b.find('.value').text(new_text);
+
+      if (old_text != new_text) {
         b.addClass("unsettled");
       } else {
         b.removeClass("unsettled");
       }
+    }
+
+    // https://stackoverflow.com/questions/3115150/#9310752
+    // Note: removed \\s
+    function escape(s) {
+      return s.replace(/[-\[\]{}()*+?.,\^\$|#]/g, '\\$&');
+    }
+
+    function regexWord(word) {
+      // negative lookbehind + negative lookahead on a `word` character
+      return new RegExp('(?<!\w)(' + escape(word) + ')(?!\w)', 'g');
+    }
+
+    function evaluateBlob(b) {
+      let vars = getVarsFromBlobs();
+      
+      // This blob
+      b = $(b);
+
+      function substitute(inValues, inCaptions) {
+        // Parse formula
+        let f = b.data('formula');
+        // Compute this blob's result
+        let r = null;
+        try {
+          // Interpret  #N  as  (inValues[N - 1])
+          f = f.replace(/#([0-9]+)/g, (match, group, i) => ("(" + inValues[parseInt(group) - 1] + ")"));
+          // Interpret  ##  as  the whole input array (inValues)
+          f = f.replace(/##/g, "[" + inValues + "]");
+          // Interpret  #   as the sum of inputs
+          f = f.replace(/#/g, "(" + sum(inValues) + ")");
+          // Attempt to substitute Caption of incoming blobs
+          for (let [cap, val] of zip(inCaptions, inValues)) {
+            if (cap.length) {
+              f = f.replace(regexWord(cap), "(" + JSON.stringify(val) + ")");
+            }
+          }
+          // Attempt to substitute other Captions
+          for (let [cap, val] of vars) {
+            if (cap.length) {
+              f = f.replace(regexWord(cap), "(" + JSON.stringify(val) + ")");
+            }
+          }
+          // Percentage sign as "percent"
+          f = f.replace(/%/g, "*0.01 ");
+          // Ready to parse/evaluate the resulting expression
+          r = eval(f);
+        } catch(err) {
+          r = null;
+        }
+        return r;
+      }
+
+      // Inflow blobs Array
+      let inBlobs = getLinesOf(b, +1).toArray().map(
+        (line, i) => $("div.blob[name=" + $(line).data('a') + "]")
+      );
+
+      // Captions of the inflow blobs
+      let inCaptions = inBlobs.map(
+        (a, i) => a.data('caption')
+      )
+
+      // Inflow values Array
+      let inValues = inBlobs.map(
+        (a, i) => a.data('value')
+      );
+
+      let vectorize = false;
+
+      if (inValues.length) {
+        if (inValues.length == 1) {
+          if (Array.isArray(inValues[0])) {
+            // Reduction mode
+            inValues = inValues[0];
+          }
+        } else {
+          // Vectorization mode if
+          //  - there is more than one input
+          //  - any of the inputs is an array
+          vectorize = inValues.some(Array.isArray);
+        }
+      }
+
+      let r = null;
+      if (vectorize) {
+        // Broadcast size
+        let len = min(inValues.filter(Array.isArray).map((x, i) => x.length));
+
+        // Convert any scalars to arrays
+        inValues = inValues.map(
+          (x, i) => (Array.isArray(x) ? x : Array(len).fill(x))
+        )
+
+        r = Array.from(zip(...inValues)).map(
+          (a, i) => substitute(a, inCaptions)
+        );
+      } else {
+        r = substitute(inValues, inCaptions);
+      }
+
+      // Save & visualize result
+      updateBlobValue(b, r);
     }
 
     function evaluateAllBlobs() {
@@ -121,15 +285,23 @@
         function() {
           evaluateAllBlobs();
         },
-        1000
+        747
       );
     });
 
     function unselectAllBlobs() {
-        var blobs = $("div.blob");
+        let blobs = $("div.blob.selected");
         blobs.removeClass("selected");
         blobs.draggable('enable');
         blobs.resizable('disable');
+        blobs.removeClass("formulating"); 
+
+        return blobs;
+    }
+
+    function frontSeat(element) {
+      // Bring to front
+      element.css("z-index", Math.round(Date.now() / 1000));
     }
 
     // On-ready: register SVG arrowhead
@@ -149,46 +321,59 @@
       });
     }
 
+    // Note: does not change b.data('value')
     function parseUserInputForBlob(b) {
-      var f = b.data('userinput');
+      let f = b.data('userinput');
 
       // Parse formula
-      f = f.includes(':') ? f.split(":", 2) : ["", f];
+      f = f.includes(':') ? f.split(/:(.+)/) : ["", f];
       b.data('caption', f[0]);
       b.data('formula', f[1]);
-
-      // The computed value
-      b.data('value', NaN);
     }
 
-    function promptFormulaForBlob(b) {
-      var f = prompt("Specify cell in the format Caption: Formula", b.data('userinput'));
+    function onUserFormulaInput(b) {
+      let f = b.find("> .formula").val();
+
       if (f) {
         b.data('userinput', f);
         parseUserInputForBlob(b);
 
-        // Trigger computation
+        // Note: isNaN(undefined) is true
+        if (isNaN(b.data('value'))) {
+          // Safer bet for computation: set value = 0
+          updateBlobValue(b, 0);
+        }
+
+        // Trigger computation for this blob only
         evaluateBlob(b);
-        evaluateAllBlobs();
+      } else {
+        b.find("> .formula").val(b.data('userinput'));
       }
+    }
+
+    function promptFormulaForBlob(b) {
+      b.addClass("formulating");
+      b.find(".formula").focus();
+      b.resizable('disable');
+      b.draggable('disable');
     }
 
 
     function correctLinePosition(line) {
-      var a = $("div.blob[name=" + line.data('a') + "]");
-      var b = $("div.blob[name=" + line.data('b') + "]");
+      let a = $("div.blob[name=" + line.data('a') + "]");
+      let b = $("div.blob[name=" + line.data('b') + "]");
 
       function getLeft(x) {
         return x.position().left + parseInt(x.css("border-left-width")) + parseInt(x.css("margin-left")) + parseInt(x.css("paddling-left"));
       }
 
       // https://stackoverflow.com/questions/31114656/jquery-position-include-margin
-      var x1 = a.position().left + a.innerWidth() / 2;
-      var y1 = a.position().top + a.innerHeight() / 2;
-      var x2 = b.position().left + b.innerWidth() / 2;
-      var y2 = b.position().top + b.innerHeight() / 2;
-      var s = Math.min(0.48, 0.55 * Math.sqrt(a.outerWidth() ** 2 + a.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)));
-      var t = Math.min(0.48, 0.55 * Math.sqrt(b.outerWidth() ** 2 + b.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)));
+      let x1 = a.position().left + a.innerWidth() / 2;
+      let y1 = a.position().top + a.innerHeight() / 2;
+      let x2 = b.position().left + b.innerWidth() / 2;
+      let y2 = b.position().top + b.innerHeight() / 2;
+      let s = Math.min(0.48, 0.55 * Math.sqrt(a.outerWidth() ** 2 + a.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)));
+      let t = Math.min(0.48, 0.55 * Math.sqrt(b.outerWidth() ** 2 + b.outerHeight() ** 2) / (1 + Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)));
       line.attr('x1', x1 + s * (x2 - x1));
       line.attr('y1', y1 + s * (y2 - y1));
       line.attr('x2', x2 - t * (x2 - x1));
@@ -196,16 +381,13 @@
     }
 
     function correctLinesForBlob(blob) {
-      $("line").each(function(i) {
-        var line = $(this);
-        if ((line.data('a') == blob.data('id')) || (line.data('b') == blob.data('id'))) {
-          correctLinePosition(line);
-        }
-      })
+      getLinesOf(blob, which=0).each(function(i) {
+        correctLinePosition($(this));
+      });
     }
 
     function connectBlobs(a, b) {
-      var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      let line = document.createElementNS("http://www.w3.org/2000/svg", "line");
       $("div.canvas svg").append(line);
 
       // https://stackoverflow.com/questions/8638621/jquery-svg-why-cant-i-addclass
@@ -223,8 +405,45 @@
     }
 
     function disconnectBlobs(a, b) {
-      var lines = getLinesFromTo(a, b);
+      let lines = getLinesFromTo(a, b);
       lines.remove();
+    }
+
+    function selectBlobOrUnselect(blob) {
+      if (unselectAllBlobs().filter(blob).length) {
+        // The blob has been just unselected
+        // Actually, this never happens:
+        // Clicking on a selected blob triggers the formula prompt
+      } else {
+        $(blob).addClass("selected");
+        $(blob).resizable('enable');
+
+        // Too late?
+        //$(blob).draggable('disable');
+      }
+    }
+
+    function clickAction(b) {
+      let a = $("div.blob.selected");
+      frontSeat(b);
+      if (a.length) {
+        if (a.is(b)) {
+          if (b.hasClass("formulating")) {
+          } else {
+            promptFormulaForBlob(a);
+          }
+        } else {
+          unselectAllBlobs();
+          let lines = getLinesFromTo(a, b);
+          if (lines.length) {
+            disconnectBlobs(a, b);
+          } else {
+            connectBlobs(a, b);
+          }
+        }
+      } else {
+        selectBlobOrUnselect(b);
+      }
     }
 
     function prepareBlob(blob) {
@@ -236,26 +455,51 @@
       blob.data('userinput', "Result: #");
       parseUserInputForBlob(blob);
 
-      blob.append($('<span class="caption" /> <br> <span class="value" />'));
+      blob.append($(
+        '<textarea class="formula" />' +
+        '<span class="caption" />' +
+        '<br>' +
+        '<span class="value" />'
+      ));
 
-      function selection(evt) {
-        if (blob.hasClass("selected")) {
-          unselectAllBlobs();
-        } else {
-          unselectAllBlobs();
-          $(blob).addClass("selected");
-          $(blob).resizable('enable');
-          // Too late?
-          //$(blob).draggable('disable');
+      let formula = blob.find("> .formula");
+      formula.val(blob.data('userinput'));
+
+      formula.focusout(
+        function(evt) {
+          onUserFormulaInput(blob);
         }
-        silence(evt);
-      }
+      );
+
+      formula.click(
+        function(evt) {
+          //evt.stopPropagation();
+        }
+      );
+
+      formula.keydown(function(evt) {
+        if (evt.keyCode === ENTER) {
+          // Save user input
+          onUserFormulaInput(blob);
+          silence(evt);
+          unselectAllBlobs();
+        }
+        if (evt.keyCode === ESCAPE) {
+          // Undo
+          formula.val(blob.data('userinput'));
+          unselectAllBlobs();
+        }
+      });
 
       blob.draggable({
+        // https://api.jqueryui.com/draggable
+        containment: "parent",
+        distance: 3,
+
         // https://jqueryui.com/draggable/#events
-        'containment': "parent",
         'start': function(evt) {
           // Too late to unselect here?
+          frontSeat($(this));
           unselectAllBlobs();
         },
         'stop': function(evt) {
@@ -263,6 +507,7 @@
         'drag': function(evt) {
           correctLinesForBlob($(this));
         },
+
       });
 
       //blob.doubletap(silence);
@@ -271,23 +516,7 @@
       //blob.dblclick(log);
 
       blob.click(function(evt) {
-        var a = $("div.blob.selected");
-        var b = $(this);
-        if (a.length) {
-          unselectAllBlobs();
-          if (a.is(b)) {
-            promptFormulaForBlob(a);
-          } else {
-            var lines = getLinesFromTo(a, b);
-            if (lines.length) {
-              disconnectBlobs(a, b);
-            } else {
-              connectBlobs(a, b);
-            }
-          }
-        } else {
-          selection(evt);
-        }
+        clickAction($(this));
         silence(evt);
       });
 
@@ -296,10 +525,17 @@
         containment: "parent",
         minHeight: 30,
         minWidth: 50,
+        distance: 3,
         resize: function(evt) {
+          // Mechanism to prevent triggering canvas `onclick` after resizing blobs
+          $(".canvas").removeClass("mousedown");
+
           correctLinesForBlob($(this));
           unselectAllBlobs();
         },
+        stop: function(evt) {
+          silence(evt);
+        }
       });
       //
 
@@ -307,31 +543,48 @@
     }
 
     function addBlob(to, param) {
-      var ox = param.cx - param.w / 2;
-      var oy = param.cy - param.h / 2;
-      var css = {left: ox, top: oy, width: param.w, height: param.h};
-      var blob = $('<div class="blob ui-widget-content"></div>');
+      // New blob on the block
+      let ox = param.cx - param.w / 2;
+      let oy = param.cy - param.h / 2;
+      let css = {left: ox, top: oy, width: param.w, height: param.h};
+      let blob = $('<div class="blob ui-widget-content"></div>');
       $(to).append(blob.css(css));
       prepareBlob(blob);
+      return blob;
     }
 
     // On ready: blob creation
     $(
       function() {
-        var canvas = $("div.canvas");
-        canvas.mousedown(silence);
+        let canvas = $("div.canvas");
+        canvas.mousedown(
+          function(evt) {
+            // Mechanism to prevent triggering canvas `onclick` after resizing blobs
+            $(this).addClass("mousedown");
+          }
+        );
 
         canvas.click(
           {},
           function(evt) {
-            unselectAllBlobs();
+            // https://stackoverflow.com/questions/48963000/jquery-ui-click-event-is-being-triggered-on-resize
+            if ($(this).hasClass("mousedown")) {
+              if (unselectAllBlobs().length) {
+                // Canvas-click unselects blobs
+              } else {
+                // Canvas-click creates a new blob
+                let b = addBlob(this, {cx: evt.offsetX, cy: evt.offsetY, w: defaultBlobW, h: defaultBlobH});
+                selectBlobOrUnselect(b);
+              }
+            }
+
+            $(this).removeClass("mousedown");
           }
         );
 
         canvas.dblclick(
           {},
           function(evt) {
-            addBlob(this, {cx: evt.offsetX, cy: evt.offsetY, w: defaultBlobW, h: defaultBlobH});
           }
         );
       }
@@ -339,35 +592,43 @@
 
     // On-ready
     $(function() {
-      $(document).keyup(function(e) {
-        if (e.keyCode === 13) {
-
+      $(document).keydown(function(evt) {
+        if (evt.keyCode === ENTER) {
+          let b = $("div.blob.selected");
+          if (b.length) {
+            clickAction(b);
+          }
+          evt.preventDefault();
         }
-        if (e.keyCode === 27) {
+        if (evt.keyCode === ESCAPE) {
           unselectAllBlobs();
         }
       });
     });
   </script>
+<body>
 
 
 <div class="container">
   <div class="row">
     <div class="col">
       <h1>
-        NPV decision tree
+        Blobular
       </h1>
     </div>
   </div>
   <div class="row">
     <div class="col" style="font-size:80%">
-      This is a simple graphical tool for
+      This is a graphical tool 
+      originally designed for small
       <a href="https://www.investopedia.com/terms/n/npv.asp" target="_blank">NPV</a>
       decision tree computation.
-      Double-click to add a new cell.
-      Click a cell to activate.
-      Click again to edit its formula,
-      or another cell to dis/connect.
+
+      Usage:
+      Click anywhere to add a new cell 
+      or click on an existing cell to activate it.
+      Click on it again to edit its formula,
+      or on another cell to dis/connect.
       The formula should be like
       <ul>
         <li>
@@ -377,23 +638,46 @@
           <em>or</em>
         </li>
         <li>
-          <span class="formula">PV: # / ((1 + $r) ** 2)</span>
+          <span class="formula">PV: # / ((1 + r) ** 2)</span>
           --
           this cell, called <span class="formula">PV</span>, is the sum <span class="formula">#</span>
           of inflow cells discounted over two years by <span class="formula">r</span>.
         </li>
       </ul>
-      You can use the
-      <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math" target="_blank">Math object</a>,
-      e.g.
-      <span class="formula">Math.max(#, 0)</span>.
+      Some math functions like 
+      <span class="formula">max</span>
+      are defined.
       The cells are recomputed periodically.
-      See <a href="img/example02.png" target="_blank">example</a>.
+      The inflow cells can also be accessed as 
+      <span class="formula">#1</span>, 
+      <span class="formula">#2</span>,
+      while
+      <span class="formula">##</span> collects them in an array.
+      If at least one of the inflow cells contains an array,
+      the computation is performed on the elements in parallel
+      (aka "zipped" or "vectorized");
+      if there is only one inflow connection,
+      the receiving cell receives the whole array.
+      Some whole-array operations are then
+      <span class="formula">#</span>, 
+      <span class="formula">sum(##)</span>,
+      <span class="formula">prod(##)</span>
+      and
+      <span class="formula">max(##)</span>,
+      or again 
+      <span class="formula">#1</span>,
+      <span class="formula">#2</span>,
+      etc.
+      The function
+      <span class="formula">numbers(a, b)</span>
+      generates the integer numbers from 
+      <span class="formula">a</span> to <span class="formula">b</span>.
+      See <a href="img/example04.png" target="_blank">example</a>.
     </div>
   </div>
   <div class="row">
     <div class="col b canvas">
-      
+
     </div>
   </div>
   <div class="row">
@@ -402,6 +686,8 @@
         License: MIT
       </div>
       <div class="float-right">
+        2020-05-04
+        /
         <a href="http://numpde.xyz/" target="_blank">RA</a>
         &lt;busybus &#x1f408; null.net&gt;
       </div>
