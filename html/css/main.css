@@ -63,7 +63,7 @@ div.blob.array:not(.selected) {
 }
 
 
-// https://stackoverflow.com/questions/1953119/jquery-draggable-changing-css-top-value
+/* https://stackoverflow.com/questions/1953119/jquery-draggable-changing-css-top-value */
 .ui-draggable-dragging{
     top:0 !important;
 }
