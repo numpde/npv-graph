@@ -1,4 +1,9 @@
 
+div.container {
+	max-width: none;
+	width: 100%;
+}
+
 div.row {
 	background-color: #ddd;
 }
@@ -17,6 +22,14 @@ div.canvas {
 
 	margin: 0;
 	padding: 0;
+
+	background-color: #eee;
+	transition: background-color 1s;
+}
+
+div.canvas.justcopied {
+	background-color: transparent;
+	transition: background-color 0s;
 }
 
 div.blob {
@@ -83,8 +96,8 @@ div.blob span.value {
 }
 
 div.blob.formulating {
-	min-width: 100px;
-	min-height: 50px;
+	min-width: 140px;
+	min-height: 60px;
 }
 
 div.blob.formulating > :not(textarea) {

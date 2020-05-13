@@ -13,21 +13,23 @@
   <link rel="stylesheet" type="text/css" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/themes/base/jquery-ui.css"/>
 
   <script src="js/jquery.ui.touch-punch.min.js"></script>
+  <script src="js/jquery.mousewheel.min.js"></script>
 
-  <link rel="stylesheet" type="text/css" href="css/main.css?v=20200504">
-</head>
-<script>
+  <link rel="stylesheet" type="text/css" href="css/main.css?v=20200512">
+
+  <script>
     // Graph items counters
     var nblobs = 0;
     var nlines = 0;
 
     // Graph: visuals
-    var defaultBlobW = 60;
+    var defaultBlobW = 80;
     var defaultBlobH = 40;
 
     // Key codes
     ENTER = 13;
     ESCAPE = 27;
+    DELETE = 46;
 
     // Zip util: https://stackoverflow.com/a/49035018/
     function* zip(...its) {
@@ -93,6 +95,54 @@
       console.log({'event': (evt.type ? evt.type : evt), 'more': what});
     }
 
+    // Serialize Canvas to JSON
+    function serializeCanvas() {
+      let blobs = $("div.blob.selected") || $("div.blob");
+      let package = blobs.toArray().map(
+        (b, i) => ({
+          name: $(b).attr('name'),
+          value: $(b).data('value'),
+          userInput: $(b).data('userinput'),
+          cssText: b.style.cssText,
+          inBlobs: getLinesOf($(b), +1).toArray().map(
+            (line, i) => $(line).attr('a')
+          ),
+        })
+      );
+      return JSON.stringify(package);
+    }
+
+    // JSON string to Canvas
+    function unserializeToCanvas(package) {
+      package = JSON.parse(package);
+
+      // Old blob name --> new blob name
+      let remap = new Map();
+
+      for (let blob of package) {
+        let b = addBlob($("div.canvas"), {cx: 0, cy: 0, w: 0, h: 0});
+        b[0].style.cssText = blob.cssText;
+        remap.set(blob.name, b.attr('name'));
+      }
+
+      for (let blob of package) {
+        for (let a_name of blob.inBlobs) {
+          let a = $("div.blob[name=" + remap.get(a_name) + "]");
+          let b = $("div.blob[name=" + remap.get(blob.name) + "]");
+          connectBlobs(a, b);
+        }
+      }
+
+      for (let blob of package) {
+        let b = $("div.blob[name=" + remap.get(blob.name) + "]");
+        b.find("> .formula").val(blob.userInput);
+        b.data('value', blob.value);
+        onUserFormulaInput(b);
+      }
+
+      evaluateAllBlobs();
+    }
+
     // Convenience function for events
     function silence(evt) {
         evt.stopPropagation();
@@ -104,8 +154,8 @@
     function getLinesFromTo(a, b) {
       let lines = $("line").filter(function(i) {
         let line = $(this);
-        let ia = (a === null) || (line.data('a') == a.data('id'));
-        let ib = (b === null) || (line.data('b') == b.data('id'));
+        let ia = (a === null) || (line.attr('a') == a.attr('name'));
+        let ib = (b === null) || (line.attr('b') == b.attr('name'));
         return (ia & ib);
       });
       return lines;
@@ -116,8 +166,8 @@
     function getLinesOf(blob, which=0) {
       let lines = $("line").filter(function(i) {
         return (
-          ((which <= 0) && (blob.data('id') == $(this).data('a'))) ||
-          ((0 <= which) && ($(this).data('b') == blob.data('id')))
+          ((which <= 0) && (blob.attr('name') == $(this).attr('a'))) ||
+          ((0 <= which) && ($(this).attr('b') == blob.attr('name')))
         );
       });
       return lines;
@@ -150,7 +200,7 @@
       b.data('value', ((v != null) ? v : null));
 
       // Visualize
-      b.find(".caption").text(b.data('caption'));
+      b.find(".caption").text(b.data('caption') || b.data('formula'));
 
       let old_text = b.find(".value").text();
       let new_text;
@@ -180,7 +230,7 @@
 
     function regexWord(word) {
       // negative lookbehind + negative lookahead on a `word` character
-      return new RegExp('(?<!\w)(' + escape(word) + ')(?!\w)', 'g');
+      return new RegExp('(?<!\\w)(' + escape(word) + ')(?!\\w)', 'g');
     }
 
     function evaluateBlob(b) {
@@ -188,6 +238,21 @@
       
       // This blob
       b = $(b);
+
+      // Inflow blobs Array
+      let inBlobs = getLinesOf(b, +1).toArray().map(
+        (line, i) => $("div.blob[name=" + $(line).attr('a') + "]")
+      );
+
+      // Captions of the inflow blobs
+      let inCaptions = inBlobs.map(
+        (a, i) => a.data('caption')
+      )
+
+      // Inflow values Array
+      let inValues = inBlobs.map(
+        (a, i) => a.data('value')
+      );
 
       function substitute(inValues, inCaptions) {
         // Parse formula
@@ -216,6 +281,7 @@
           // Percentage sign as "percent"
           f = f.replace(/%/g, "*0.01 ");
           // Ready to parse/evaluate the resulting expression
+          //logger("eval", f); // DEBUG
           r = eval(f);
         } catch(err) {
           r = null;
@@ -223,54 +289,54 @@
         return r;
       }
 
-      // Inflow blobs Array
-      let inBlobs = getLinesOf(b, +1).toArray().map(
-        (line, i) => $("div.blob[name=" + $(line).data('a') + "]")
-      );
+      function tryVectorizeAndCompute(inValues, inCaptions) {
+        let vectorize = false;
 
-      // Captions of the inflow blobs
-      let inCaptions = inBlobs.map(
-        (a, i) => a.data('caption')
-      )
-
-      // Inflow values Array
-      let inValues = inBlobs.map(
-        (a, i) => a.data('value')
-      );
-
-      let vectorize = false;
-
-      if (inValues.length) {
         if (inValues.length == 1) {
           if (Array.isArray(inValues[0])) {
             // Reduction mode
             inValues = inValues[0];
+
+            // inValues could still be an array
+            // In this case, do not zip, but apply elementwise
           }
         } else {
-          // Vectorization mode if
-          //  - there is more than one input
-          //  - any of the inputs is an array
-          vectorize = inValues.some(Array.isArray);
+          if (inValues.length >= 2) {
+            // Vectorization mode if
+            //  - there is more than one input
+            //  - any of the inputs is an array
+            vectorize = inValues.some(Array.isArray);
+          }
         }
+
+        let r = null;
+        if (vectorize) {
+          // Broadcast size
+          let len = min(inValues.filter(Array.isArray).map((x, i) => x.length));
+
+          // Convert any scalars to arrays
+          inValues = inValues.map(
+            (x, i) => (Array.isArray(x) ? x : Array(len).fill(x))
+          )
+
+          r = Array.from(zip(...inValues)).map(
+            (a, i) => tryVectorizeAndCompute(a, inCaptions)
+          );
+        } else {
+          if (inValues.some(Array.isArray)) {
+            r = inValues.map(
+              (x, i) => substitute(x, inCaptions)
+            );
+          } else {
+            r = substitute(inValues, inCaptions);
+          }
+        }
+        
+        return r;
       }
 
-      let r = null;
-      if (vectorize) {
-        // Broadcast size
-        let len = min(inValues.filter(Array.isArray).map((x, i) => x.length));
-
-        // Convert any scalars to arrays
-        inValues = inValues.map(
-          (x, i) => (Array.isArray(x) ? x : Array(len).fill(x))
-        )
-
-        r = Array.from(zip(...inValues)).map(
-          (a, i) => substitute(a, inCaptions)
-        );
-      } else {
-        r = substitute(inValues, inCaptions);
-      }
-
+      r = tryVectorizeAndCompute(inValues, inCaptions);
+    
       // Save & visualize result
       updateBlobValue(b, r);
     }
@@ -289,14 +355,16 @@
       );
     });
 
-    function unselectAllBlobs() {
-        let blobs = $("div.blob.selected");
+    function unselectBlobs(blobs) {
         blobs.removeClass("selected");
         blobs.draggable('enable');
         blobs.resizable('disable');
         blobs.removeClass("formulating"); 
-
         return blobs;
+    }
+
+    function unselectAllBlobs() {
+        return unselectBlobs($("div.blob.selected"));
     }
 
     function frontSeat(element) {
@@ -360,8 +428,8 @@
 
 
     function correctLinePosition(line) {
-      let a = $("div.blob[name=" + line.data('a') + "]");
-      let b = $("div.blob[name=" + line.data('b') + "]");
+      let a = $("div.blob[name=" + line.attr('a') + "]");
+      let b = $("div.blob[name=" + line.attr('b') + "]");
 
       function getLeft(x) {
         return x.position().left + parseInt(x.css("border-left-width")) + parseInt(x.css("margin-left")) + parseInt(x.css("paddling-left"));
@@ -396,8 +464,8 @@
       line = $(line);
 
       line.attr('name', nlines++);
-      line.data('a', a.data('id'));
-      line.data('b', b.data('id'));
+      line.attr('a', a.attr('name'));
+      line.attr('b', b.attr('name'));
 
       prepareLine(line);
 
@@ -407,6 +475,15 @@
     function disconnectBlobs(a, b) {
       let lines = getLinesFromTo(a, b);
       lines.remove();
+    }
+
+    function flipSelectionOfBlob(b) {
+      if (b.hasClass("selected")) {
+        unselectBlobs(b);
+      } else {
+        b.addClass("selected");
+        b.resizable('enable');
+      }
     }
 
     function selectBlobOrUnselect(blob) {
@@ -423,36 +500,60 @@
       }
     }
 
-    function clickAction(b) {
-      let a = $("div.blob.selected");
+    function blobClickAction(b, shiftKey=false) {
       frontSeat(b);
-      if (a.length) {
-        if (a.is(b)) {
-          if (b.hasClass("formulating")) {
-          } else {
-            promptFormulaForBlob(a);
-          }
-        } else {
-          unselectAllBlobs();
-          let lines = getLinesFromTo(a, b);
-          if (lines.length) {
-            disconnectBlobs(a, b);
-          } else {
-            connectBlobs(a, b);
-          }
-        }
-      } else {
-        selectBlobOrUnselect(b);
+
+      // For now assume that `selected` is at most a singleton
+      let selected = $("div.blob.selected");
+
+
+      if ((selected.length == 0) || shiftKey) {
+        flipSelectionOfBlob(b);
+        return;
       }
+
+      if ((selected.length == 1) && selected.is(b)) {
+        // Clicking on a single selected blob
+        if (b.hasClass("formulating")) {
+        } else {
+          promptFormulaForBlob(selected);
+        }
+        return;
+      }
+
+      if (selected.filter(b).length) {
+        // Several blobs are selected, and one of them is clicked
+        // Undefined behavior
+        return;
+      }
+
+      // Several blobs are selected
+      // Another one is clicked
+      selected.map(function(i) {
+        let a = $(this);
+        //unselectAllBlobs();
+        let lines = getLinesFromTo(a, b);
+        if (lines.length) {
+          disconnectBlobs(a, b);
+        } else {
+          connectBlobs(a, b);
+        }
+      });
+    }
+
+    function deleteBlobs(blobs) {
+      blobs.map((i, b) => getLinesOf($(b)).remove());
+      blobs.remove();
+      evaluateAllBlobs();
     }
 
     function prepareBlob(blob) {
       // Order matters: https://stackoverflow.com/a/18032193
 
-      blob.data('id', nblobs++);
-      blob.attr('name', blob.data('id'));
+      blob.attr('name', nblobs++);
+      blob.attr('name', blob.attr('name'));
 
-      blob.data('userinput', "Result: #");
+      blob.data('userinput', "X: 1");
       parseUserInputForBlob(blob);
 
       blob.append($(
@@ -489,6 +590,14 @@
           formula.val(blob.data('userinput'));
           unselectAllBlobs();
         }
+
+        // Important: prevent document/canvas from responding
+        evt.stopPropagation();
+      });
+
+      formula.mousewheel(function(evt) {
+        //
+        evt.stopPropagation();
       });
 
       blob.draggable({
@@ -513,11 +622,30 @@
       //blob.doubletap(silence);
 
       blob.dblclick(silence);
-      //blob.dblclick(log);
+      //blob.dblclick(logger);
 
       blob.click(function(evt) {
-        clickAction($(this));
+        blobClickAction($(this), shiftKey=evt.shiftKey);
         silence(evt);
+      });
+
+      blob.mousewheel(function(evt) {
+        // if (!blob.hasClass("formulating")) 
+        {
+          let offset = blob.offset();
+          let sign = Math.sign(evt.deltaY);
+          let sw = 14 * sign, sh = 8 * sign;
+          let w = blob.width();
+          let h = blob.height();
+          let minh = defaultBlobH / 2;
+          let minw = defaultBlobW / 2;
+          if ((w + sw < minw) && (sw < 0)) sw = (w > minw) ? (minw - w) : 0;
+          if ((h + sh < minh) && (sh < 0)) sh = (h > minh) ? (minh - h) : 0;
+          blob.width(w + sw);
+          blob.height(h + sh);
+          blob.offset({left: offset.left - sw/2, top: offset.top - sh/2});
+          silence(evt);
+        }
       });
 
       blob.resizable({
@@ -595,105 +723,145 @@
       $(document).keydown(function(evt) {
         if (evt.keyCode === ENTER) {
           let b = $("div.blob.selected");
-          if (b.length) {
-            clickAction(b);
+          if (b.length == 1) {
+            blobClickAction(b);
+            evt.preventDefault();
           }
+        }
+
+        if (evt.keyCode === ESCAPE) {
+          if ($("div.blob").length) {
+            if (unselectAllBlobs().length) {
+              // Esc unselects blobs
+            } else {
+              // There were no selected blobs
+            }
+          } else {
+            // The canvas is empty
+            toggleVisibility($('[name=instructions]'));
+          }
+        }
+
+        if (evt.keyCode === DELETE) {
+          deleteBlobs($("div.blob.selected"));
           evt.preventDefault();
         }
-        if (evt.keyCode === ESCAPE) {
-          unselectAllBlobs();
+
+        if (evt.ctrlKey || evt.metaKey) {
+          if ((evt.keyCode === "C".charCodeAt(0))) {
+            // COPY
+            window.localStorage.setItem('CanvasClipboard', serializeCanvas());
+            // Animation
+            $("div.canvas").addClass("justcopied");
+            setTimeout(() => $("div.canvas").removeClass("justcopied"), 0);
+          }
+
+          if ((evt.keyCode === "V".charCodeAt(0))) {
+            // PASTE
+            unserializeToCanvas(window.localStorage.getItem('CanvasClipboard') || "[]");
+          }
         }
       });
     });
+
+    function toggleVisibility(what) {
+      if (what.css('display') == "none") {
+        what.css('display', "block");
+      } else {
+        what.css('display', "none");
+      }
+    }
   </script>
+
+</head>
+  
 <body>
 
-
-<div class="container">
-  <div class="row">
-    <div class="col">
-      <h1>
-        Blobular
-      </h1>
-    </div>
-  </div>
-  <div class="row">
-    <div class="col" style="font-size:80%">
-      This is a graphical tool 
-      originally designed for small
-      <a href="https://www.investopedia.com/terms/n/npv.asp" target="_blank">NPV</a>
-      decision tree computation.
-
-      Usage:
-      Click anywhere to add a new cell 
-      or click on an existing cell to activate it.
-      Click on it again to edit its formula,
-      or on another cell to dis/connect.
-      The formula should be like
-      <ul>
-        <li>
-          <span class="formula">r: 15%</span>
-          --
-          this cell, called <span class="formula">r</span>, has the value <span class="formula">15%</span>,
-          <em>or</em>
-        </li>
-        <li>
-          <span class="formula">PV: # / ((1 + r) ** 2)</span>
-          --
-          this cell, called <span class="formula">PV</span>, is the sum <span class="formula">#</span>
-          of inflow cells discounted over two years by <span class="formula">r</span>.
-        </li>
-      </ul>
-      Some math functions like 
-      <span class="formula">max</span>
-      are defined.
-      The cells are recomputed periodically.
-      The inflow cells can also be accessed as 
-      <span class="formula">#1</span>, 
-      <span class="formula">#2</span>,
-      while
-      <span class="formula">##</span> collects them in an array.
-      If at least one of the inflow cells contains an array,
-      the computation is performed on the elements in parallel
-      (aka "zipped" or "vectorized");
-      if there is only one inflow connection,
-      the receiving cell receives the whole array.
-      Some whole-array operations are then
-      <span class="formula">#</span>, 
-      <span class="formula">sum(##)</span>,
-      <span class="formula">prod(##)</span>
-      and
-      <span class="formula">max(##)</span>,
-      or again 
-      <span class="formula">#1</span>,
-      <span class="formula">#2</span>,
-      etc.
-      The function
-      <span class="formula">numbers(a, b)</span>
-      generates the integer numbers from 
-      <span class="formula">a</span> to <span class="formula">b</span>.
-      See <a href="img/example04.png" target="_blank">example</a>.
-    </div>
-  </div>
-  <div class="row">
-    <div class="col b canvas">
-
-    </div>
-  </div>
-  <div class="row">
-    <div class="col">
-      <div class="float-left">
-        License: MIT
-      </div>
-      <div class="float-right">
-        2020-05-04
-        /
-        <a href="http://numpde.xyz/" target="_blank">RA</a>
-        &lt;busybus &#x1f408; null.net&gt;
+  <div class="container">
+    <div class="row">
+      <div class="col" onclick="toggleVisibility($('[name=instructions]'));">
+        <h1>
+          Blobular
+        </h1>
       </div>
     </div>
+    <div class="row" name="instructions">
+      <div class="col" style="font-size:80%">
+        This is a graphical tool 
+        originally designed for small
+        <a href="https://www.investopedia.com/terms/n/npv.asp" target="_blank">NPV</a>
+        decision tree computation.
+
+        Usage:
+        Click anywhere to add a new cell 
+        or click on an existing cell to activate it.
+        Click on it again to edit its formula,
+        or on another cell to dis/connect.
+        The formula should be like
+        <ul>
+          <li>
+            <span class="formula">r: 15%</span>
+            --
+            this cell, called <span class="formula">r</span>, has the value <span class="formula">15%</span>,
+            <em>or</em>
+          </li>
+          <li>
+            <span class="formula">PV: # / ((1 + r) ** 2)</span>
+            --
+            this cell, called <span class="formula">PV</span>, is the sum <span class="formula">#</span>
+            of inflow cells discounted over two years by <span class="formula">r</span>.
+          </li>
+        </ul>
+        Some math functions like 
+        <span class="formula">max</span>
+        are defined.
+        The cells are recomputed periodically.
+        The inflow cells can also be accessed as 
+        <span class="formula">#1</span>, 
+        <span class="formula">#2</span>,
+        while
+        <span class="formula">##</span> collects them in an array.
+        If at least one of the inflow cells contains an array,
+        the computation is performed on the elements in parallel
+        (aka "zipped" or "vectorized");
+        if there is only one inflow connection,
+        the receiving cell receives the whole array.
+        Some whole-array operations are then
+        <span class="formula">#</span>, 
+        <span class="formula">sum(##)</span>,
+        <span class="formula">prod(##)</span>
+        and
+        <span class="formula">max(##)</span>,
+        or again 
+        <span class="formula">#1</span>,
+        <span class="formula">#2</span>,
+        etc.
+        The function
+        <span class="formula">numbers(a, b)</span>
+        generates the integer numbers from 
+        <span class="formula">a</span> to <span class="formula">b</span>.
+        See <a href="img/example04.png" target="_blank">example</a>.
+      </div>
+    </div>
+    <div class="row">
+      <div class="col b canvas">
+
+      </div>
+    </div>
+    <div class="row">
+      <div class="col">
+        <div class="float-left">
+          License: MIT/Expat
+        </div>
+        <div class="float-right">
+          2020-05-11
+          /
+          <a href="http://numpde.xyz/" target="_blank">RA</a>
+          &lt;busybus &#x1f408; null.net&gt;
+        </div>
+      </div>
+    </div>
   </div>
-</div>
 
 </body>
 </html>
