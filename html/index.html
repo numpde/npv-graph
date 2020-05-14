@@ -14,10 +14,26 @@
 
   <script src="js/jquery.ui.touch-punch.min.js"></script>
   <script src="js/jquery.mousewheel.min.js"></script>
+  <script src="js/jquery.nu-selectable.min.js"></script>
 
-  <link rel="stylesheet" type="text/css" href="css/main.css?v=20200512">
+  <link rel="stylesheet" type="text/css" href="css/main.css?v=20200514">
 
   <script>
+    // Event horizon
+    function blackhole(evt) {
+        evt.stopPropagation();
+        evt.preventDefault();
+    }
+
+    // Diagnostic log to console
+    function logger(evt, more) {
+      console.log({'event': (evt.type ? evt.type : evt), 'more': more});
+    }
+
+    //
+    var noop = function() { }
+
+
     // Graph items counters
     var nblobs = 0;
     var nlines = 0;
@@ -30,6 +46,7 @@
     ENTER = 13;
     ESCAPE = 27;
     DELETE = 46;
+
 
     // Zip util: https://stackoverflow.com/a/49035018/
     function* zip(...its) {
@@ -45,24 +62,12 @@
       }
     }
 
-
     // Math functions
 
-    function log10(x) {
-      return Math.log10(x);
-    }
-
-    function log2(x) {
-      return Math.log2(x);
-    }
-
-    function log(x) {
-      return Math.log(x);
-    }
-
-    function exp(x) {
-      return Math.exp(x);
-    }
+    let log10 = Math.log10;
+    let log2 = Math.log2;
+    let log = Math.log;
+    let exp = Math.exp;
 
     function numbers(a, b) {
       return Array(Math.max(b - a + 1, 0)).fill().map((_, i) => (a + i));
@@ -88,11 +93,6 @@
         return arr.reduce((m, v) => (m < v ? m : v), arr[0]);
       else
         return Math.min(arr, x);
-    }
-
-    // Diagnostic log to console
-    function logger(evt, what) {
-      console.log({'event': (evt.type ? evt.type : evt), 'more': what});
     }
 
     // Serialize Canvas to JSON
@@ -122,6 +122,7 @@
       for (let blob of package) {
         let b = addBlob($("div.canvas"), {cx: 0, cy: 0, w: 0, h: 0});
         b[0].style.cssText = blob.cssText;
+        avoidFullOcclusion(b);
         remap.set(blob.name, b.attr('name'));
       }
 
@@ -143,22 +144,25 @@
       evaluateAllBlobs();
     }
 
-    // Convenience function for events
-    function silence(evt) {
-        evt.stopPropagation();
-        evt.preventDefault();
+    //
+    function avoidFullOcclusion(blob) {
+      var occlusion = Array.from($("div.blob").not(blob)).some((other, i) => (
+        ($(other).offset().left == blob.offset().left) &&
+        ($(other).offset().top == blob.offset().top)
+      ));
+
+      if (occlusion) {
+        blob.offset({left: blob.offset().left + 10, top: blob.offset().top + 10});
+        avoidFullOcclusion(blob);
+      }
     }
 
     // Graph util
-    // a and b are blobs, but can be null
+    // a and b are blobs
     function getLinesFromTo(a, b) {
-      let lines = $("line").filter(function(i) {
-        let line = $(this);
-        let ia = (a === null) || (line.attr('a') == a.attr('name'));
-        let ib = (b === null) || (line.attr('b') == b.attr('name'));
-        return (ia & ib);
-      });
-      return lines;
+      return $("line").filter((i, el) => (
+        ($(el).attr('a') == a.attr('name')) & ($(el).attr('b') == b.attr('name'))
+      ));
     }
 
     // Graph util
@@ -563,6 +567,12 @@
         '<span class="value" />'
       ));
 
+      // Need a name for this to disable temporarily
+      function blobClickHandler(evt) {
+        blobClickAction($(evt.currentTarget), shiftKey=evt.shiftKey);
+        blackhole(evt);
+      }
+
       let formula = blob.find("> .formula");
       formula.val(blob.data('userinput'));
 
@@ -582,7 +592,7 @@
         if (evt.keyCode === ENTER) {
           // Save user input
           onUserFormulaInput(blob);
-          silence(evt);
+          blackhole(evt);
           unselectAllBlobs();
         }
         if (evt.keyCode === ESCAPE) {
@@ -596,8 +606,14 @@
       });
 
       formula.mousewheel(function(evt) {
-        //
-        evt.stopPropagation();
+        // Prevents resize-on-mousewheel feature
+        evt.stopPropagation(); 
+
+        if (!(this.scrollHeight > this.clientHeight)) {
+          // No scrollbar present
+          // https://stackoverflow.com/questions/4814398/how-can-i-check-if-a-scrollbar-is-visible
+          evt.preventDefault();
+        }
       });
 
       blob.draggable({
@@ -606,46 +622,55 @@
         distance: 3,
 
         // https://jqueryui.com/draggable/#events
-        'start': function(evt) {
+        start: function(evt) {
           // Too late to unselect here?
           frontSeat($(this));
-          unselectAllBlobs();
+          //unselectAllBlobs();
+
+          blob.off("click", blobClickHandler);
         },
-        'stop': function(evt) {
+        stop: function(evt) {
+          setTimeout(function() { blob.click(blobClickHandler); }, 0);
         },
-        'drag': function(evt) {
+        drag: function(evt) {
           correctLinesForBlob($(this));
         },
 
       });
 
-      //blob.doubletap(silence);
+      //blob.doubletap(blackhole);
 
-      blob.dblclick(silence);
+      blob.dblclick(blackhole);
       //blob.dblclick(logger);
 
-      blob.click(function(evt) {
-        blobClickAction($(this), shiftKey=evt.shiftKey);
-        silence(evt);
+      blob.mousedown(function(evt) {
+        // Prevent canvas from responding
+        // In particular the nuSelection plugin
+        evt.stopPropagation();
       });
 
+      blob.click(blobClickHandler);
+
       blob.mousewheel(function(evt) {
-        // if (!blob.hasClass("formulating")) 
-        {
-          let offset = blob.offset();
-          let sign = Math.sign(evt.deltaY);
-          let sw = 14 * sign, sh = 8 * sign;
-          let w = blob.width();
-          let h = blob.height();
-          let minh = defaultBlobH / 2;
-          let minw = defaultBlobW / 2;
-          if ((w + sw < minw) && (sw < 0)) sw = (w > minw) ? (minw - w) : 0;
-          if ((h + sh < minh) && (sh < 0)) sh = (h > minh) ? (minh - h) : 0;
-          blob.width(w + sw);
-          blob.height(h + sh);
-          blob.offset({left: offset.left - sw/2, top: offset.top - sh/2});
-          silence(evt);
-        }
+        // Resize blob
+        let offset = blob.offset();
+        let sign = Math.sign(evt.deltaY);
+        let sw = 14 * sign, sh = 8 * sign;
+        let w = blob.width();
+        let h = blob.height();
+        let minw = defaultBlobW / 2;
+        let minh = defaultBlobH / 2;
+        let maxw = defaultBlobW * 5;
+        let maxh = defaultBlobH * 5;
+        if ((w + sw < minw) && (sw < 0)) sw = (w > minw) ? (minw - w) : 0;
+        if ((h + sh < minh) && (sh < 0)) sh = (h > minh) ? (minh - h) : 0;
+        if ((w + sw > maxw) && (sw > 0)) sw = (w < maxw) ? (maxw - w) : 0;
+        if ((h + sh > maxh) && (sh > 0)) sh = (h < maxh) ? (maxh - h) : 0;
+        blob.width(w + sw);
+        blob.height(h + sh);
+        blob.offset({left: offset.left - sw/2, top: offset.top - sh/2});
+        correctLinesForBlob(blob);
+        blackhole(evt);
       });
 
       blob.resizable({
@@ -656,14 +681,18 @@
         distance: 3,
         resize: function(evt) {
           // Mechanism to prevent triggering canvas `onclick` after resizing blobs
-          $(".canvas").removeClass("mousedown");
+          $(".canvas").removeClass("acceptClick");
 
           correctLinesForBlob($(this));
           unselectAllBlobs();
         },
+        start: function(evt) {
+          blob.off("click", blobClickHandler);
+        },
         stop: function(evt) {
-          silence(evt);
-        }
+          setTimeout(function() { blob.click(blobClickHandler); }, 0);
+          blackhole(evt);
+        },
       });
       //
 
@@ -681,44 +710,71 @@
       return blob;
     }
 
-    // On ready: blob creation
-    $(
-      function() {
-        let canvas = $("div.canvas");
-        canvas.mousedown(
-          function(evt) {
-            // Mechanism to prevent triggering canvas `onclick` after resizing blobs
-            $(this).addClass("mousedown");
-          }
-        );
+    // On ready: blob creation mechanism
+    $(function() {
+      let canvas = $("div.canvas");
+      canvas.mousedown(
+        function(evt) {
+          // Mechanism to prevent triggering canvas `onclick` after resizing blobs
+          $(this).addClass("acceptClick");
+        }
+      );
 
-        canvas.click(
-          {},
-          function(evt) {
-            // https://stackoverflow.com/questions/48963000/jquery-ui-click-event-is-being-triggered-on-resize
-            if ($(this).hasClass("mousedown")) {
-              if (unselectAllBlobs().length) {
-                // Canvas-click unselects blobs
-              } else {
-                // Canvas-click creates a new blob
-                let b = addBlob(this, {cx: evt.offsetX, cy: evt.offsetY, w: defaultBlobW, h: defaultBlobH});
-                selectBlobOrUnselect(b);
-              }
+      canvas.click(
+        {},
+        function(evt) {
+          // https://stackoverflow.com/questions/48963000/jquery-ui-click-event-is-being-triggered-on-resize
+          if ($(this).hasClass("acceptClick")) {
+            if (unselectAllBlobs().length) {
+              // Canvas-click unselects blobs
+            } else {
+              // Canvas-click creates a new blob
+              let b = addBlob(this, {cx: evt.offsetX, cy: evt.offsetY, w: defaultBlobW, h: defaultBlobH});
+              selectBlobOrUnselect(b);
             }
-
-            $(this).removeClass("mousedown");
           }
-        );
 
-        canvas.dblclick(
-          {},
-          function(evt) {
-          }
-        );
-      }
-    );
+          // Signal that the click has been consumed
+          $(this).removeClass("acceptClick");
+        }
+      );
 
-    // On-ready
+      canvas.dblclick(
+        {},
+        noop
+      );
+    });
+
+    // On-ready: multiblob selection
+    $(function() {
+      $("div.canvas").nuSelectable({
+        items: 'div.blob',
+        boxClass: 'nu-selection-box',
+        selectedClass: 'selected',
+        start: function() {
+          // Prevent triggering canvas `onclick`
+          $(".canvas").removeClass("acceptClick");
+        },
+      });
+    });
+
+
+    // // On-ready: multiblob selection
+    // $(function() {
+    //   $("div.canvas").nuSelectable({
+    //     items: 'div.blob',
+    //     boxClass: 'nu-selection-box',
+    //     selectedClass: 'selected',
+    //     start: function() { logger("start"); },
+    //     select: function(item) { logger("select", item); },
+    //     unselect: function(item) { logger("unselect", item); },
+    //     stop: function() { logger("stop"); },
+    //     distance: 10,
+    //     itemsChange: true,
+    //   });
+    // });
+
+    // On-ready: keyboard shortcuts
     $(function() {
       $(document).keydown(function(evt) {
         if (evt.keyCode === ENTER) {
@@ -732,7 +788,7 @@
         if (evt.keyCode === ESCAPE) {
           if ($("div.blob").length) {
             if (unselectAllBlobs().length) {
-              // Esc unselects blobs
+              // ESC unselects blobs
             } else {
               // There were no selected blobs
             }
@@ -863,5 +919,6 @@
     </div>
   </div>
 
+  
 </body>
 </html>

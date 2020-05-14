@@ -19,6 +19,7 @@ div.row + div.row {
 div.canvas {
 	width: 100%;
 	height: 1000px;
+	position: relative;
 
 	margin: 0;
 	padding: 0;
@@ -62,11 +63,6 @@ div.blob.array:not(.selected) {
 	background-color: #def;
 }
 
-
-/* https://stackoverflow.com/questions/1953119/jquery-draggable-changing-css-top-value */
-.ui-draggable-dragging{
-    top:0 !important;
-}
 
 
 line.arrow {
@@ -117,6 +113,8 @@ div.blob.formulating > textarea {
 	background-color: transparent;
 	border: none;
 	outline: none;
+
+	/*overscroll-behavior: none;*/
 }
 
 
@@ -126,4 +124,12 @@ span.formula {
 
 ul {
 	margin: 0;
+}
+
+
+.nu-selection-box {
+	border: 1px dotted #BBB;
+	background: rgba(0, 0, 0, 0.04);
+	pointer-events: none;
+
 }
